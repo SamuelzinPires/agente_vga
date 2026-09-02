@@ -1,0 +1,8 @@
+google-genai
+groq
+supabase
+reportlab
+python-dotenv
+requests
+beautifulsoup4
+lxml

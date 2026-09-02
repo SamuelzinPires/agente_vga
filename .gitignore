@@ -1,0 +1,21 @@
+.env
+
+# Dados pessoais reais (telefone, e-mail, historico completo). O repositorio
+# publica apenas perfil.example.json; o arquivo real fica local e, na nuvem,
+# vai como o secret PERFIL_JSON.
+perfil.json
+
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pdf
+.DS_Store
+.idea/
+.vscode/
+Thumbs.db
+curriculos_gerados/
+dossies_vagas/
+cartas_apresentacao/
+vagas_processadas.json
+*.log

@@ -1,0 +1,73 @@
+{
+  "_comentario": "Copie para perfil.json e preencha com dados reais. perfil.json esta no .gitignore: dados pessoais nao entram no repositorio. Na nuvem, cole o conteudo do arquivo preenchido no secret PERFIL_JSON.",
+
+  "nome": "Seu Nome Completo",
+  "cargo_atual": "Engenheiro de Dados Júnior",
+  "localizacao": "Cidade, UF",
+  "contato": {
+    "email": "seu.email@exemplo.com",
+    "phone": "(00) 00000-0000",
+    "linkedin": "linkedin.com/in/seu-perfil",
+    "github": "github.com/seu-usuario"
+  },
+
+  "cargos_alvo": [
+    "Engenheiro de Dados",
+    "Analista de Dados",
+    "Analista de BI",
+    "Analytics Engineer"
+  ],
+
+  "resumo_profissional": "Dois a quatro períodos descrevendo sua atuação, a stack que você realmente domina e o que está estudando agora. É a base do resumo que a IA adapta para cada vaga.",
+
+  "experiencias": [
+    {
+      "empresa": "Nome da Empresa",
+      "cargo": "Seu Cargo",
+      "periodo": "Mês Ano - Mês Ano | Cidade, UF",
+      "detalhes": [
+        "Realização concreta, de preferência com número ou resultado.",
+        "Segunda realização. O PDF usa no máximo 2 por experiência."
+      ],
+      "tecnologias": ["Tecnologia 1", "Tecnologia 2"]
+    }
+  ],
+
+  "projetos_tecnicos": [
+    {
+      "titulo": "Nome do Projeto (Mês/Ano)",
+      "topicos": [
+        "O que o projeto faz e qual problema resolve.",
+        "Stack usada e link do repositório. O PDF usa no máximo 2 por projeto."
+      ]
+    }
+  ],
+
+  "formacao": [
+    {
+      "curso": "Nome do Curso",
+      "instituicao": "Instituição",
+      "conclusao": "2025 - 2028 | Em andamento"
+    }
+  ],
+
+  "certificacoes": [
+    "Certificação ou curso relevante - situação atual"
+  ],
+
+  "habilidades_tecnicas": {
+    "Linguagens e Bibliotecas": ["Python", "Pandas"],
+    "SQL e Bancos de Dados": ["PostgreSQL"],
+    "Cloud e Dados": ["AWS S3"],
+    "Qualidade e Testes": ["pytest"],
+    "Engenharia e Infra": ["Docker", "Git"],
+    "APIs e Visualização": ["FastAPI"]
+  },
+
+  "idiomas_str": "Português (Nativo) | Inglês (Básico)",
+
+  "soft_skills": [
+    "Competência comportamental 1",
+    "Competência comportamental 2"
+  ]
+}
