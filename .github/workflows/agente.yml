@@ -2,8 +2,15 @@ name: Agente de Vagas de Dados
 
 on:
   schedule:
-    # 11:00 e 21:00 UTC = 08:00 e 18:00 no horario de Brasilia
-    - cron: '0 11,21 * * *'
+    # 10:37 e 20:37 UTC = 07:37 e 17:37 (BRT, UTC-3).
+    #
+    # Dois cuidados aqui, aprendidos medindo o atraso real:
+    # 1. Minuto 37, nao minuto 0. Cron do Actions e best effort e entra numa fila
+    #    compartilhada; o pico e na hora cheia, onde todo mundo agenda. Com
+    #    '0 11,21' as rodadas sairam 2h a 4h atrasadas.
+    # 2. ~20 min antes do horario desejado (08:00 / 18:00), para que a deriva
+    #    residual da fila caia em cima da hora em vez de depois dela.
+    - cron: '37 10,20 * * *'
   workflow_dispatch:
 
 jobs:
