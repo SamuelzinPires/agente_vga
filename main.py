@@ -17,6 +17,7 @@ import os
 import re
 import sys
 import time
+from datetime import datetime, timedelta, timezone
 
 from dotenv import load_dotenv
 
@@ -27,7 +28,12 @@ if hasattr(sys.stdout, "reconfigure"):
         pass
 
 from modules.cover_letter import gerar_arquivo_carta_apresentacao
-from modules.database import inicializar_supabase, salvar_vaga_processada, vaga_ja_processada
+from modules.database import (
+    inicializar_supabase,
+    salvar_vaga_processada,
+    ultima_notificacao,
+    vaga_ja_processada,
+)
 from modules.dossier import gerar_dossie_vaga
 from modules.llm import LLMIndisponivelError
 from modules.notifier import enviar_notificacao_vaga, enviar_resumo_rodada
@@ -115,6 +121,41 @@ def processar_vaga(vaga: dict, perfil: dict, supabase, notificar: bool) -> str:
     return "notificada"
 
 
+HORAS_SEM_NOTICIA_PARA_AVISAR = 24
+
+
+def sinal_de_vida(supabase, total_varridas: int, notificar: bool) -> None:
+    """
+    Avisa que o agente esta vivo quando a rodada nao teve nada novo.
+
+    Silencio total nao distingue "mercado parado" de "agente quebrado" - e o
+    mercado brasileiro para de verdade em fim de semana e feriado, entao o
+    silencio de varios dias e normal e assustador ao mesmo tempo. Manda no
+    maximo um aviso por dia: so quando ja faz mais de 24h desde a ultima vaga
+    notificada, para nao virar ruido a cada rodada.
+    """
+    if not notificar:
+        return
+
+    ultima = ultima_notificacao(supabase)
+    agora = datetime.now(timezone.utc)
+    if ultima and (agora - ultima) < timedelta(hours=HORAS_SEM_NOTICIA_PARA_AVISAR):
+        return
+
+    if ultima:
+        horas = int((agora - ultima).total_seconds() // 3600)
+        desde = f"Última vaga nova há {horas}h."
+    else:
+        desde = "Nenhuma vaga notificada ainda."
+
+    mensagem = [
+        "🟢 <b>Agente ativo — sem vaga nova</b>",
+        f"{total_varridas} vagas varridas nesta rodada, todas já conhecidas.",
+        desde,
+    ]
+    enviar_resumo_rodada("\n".join(mensagem))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Agente de vagas de dados")
     parser.add_argument("--dry-run", action="store_true", help="coleta e filtra sem chamar a IA")
@@ -134,6 +175,7 @@ def main() -> None:
     vagas = coletar_vagas_todas_fontes()
     if not vagas:
         print("[FIM] Nenhuma vaga passou pelos filtros nesta rodada.")
+        sinal_de_vida(inicializar_supabase(), 0, not args.sem_telegram)
         return
 
     if args.dry_run:
@@ -151,6 +193,7 @@ def main() -> None:
 
     if not novas:
         print("[FIM] Nada novo nesta rodada.")
+        sinal_de_vida(supabase, len(vagas), not args.sem_telegram)
         return
 
     fila = novas[:args.limite]

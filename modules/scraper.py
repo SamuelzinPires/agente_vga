@@ -35,13 +35,26 @@ HEADERS_HTML = {"User-Agent": USER_AGENT, "Accept-Language": "pt-BR,pt;q=0.9,en;
 
 GUPY_API = "https://employability-portal.gupy.io/api/v1/jobs"
 
+# A busca da Gupy e por substring no titulo, entao termo em portugues nao alcanca
+# anuncio publicado em ingles - e muita empresa brasileira publica "Data Engineer".
+# Sem "data engineer" nesta lista, uma vaga como "Data Engineer Junior - ODS" nao
+# chega nem a ser avaliada pelos filtros, que a aprovariam.
 TERMOS_BUSCA = [
     "engenheiro de dados",
     "engenharia de dados",
     "analista de dados",
     "analista de bi",
     "analytics engineer",
+    "data engineer",
+    "business intelligence",
+    "engenheiro de analytics",
+    "etl",
+    "dados",
 ]
+
+# O LinkedIn cobra mais caro em tempo por termo e devolve menos por busca, entao
+# leva so os tres mais produtivos em vez da lista inteira.
+TERMOS_LINKEDIN = ["engenheiro de dados", "analista de dados", "data engineer"]
 
 REPOS_VAGAS_GITHUB = ["backend-br/vagas"]
 
@@ -421,7 +434,7 @@ def coletar_vagas_todas_fontes(termos: list[str] = None) -> list[dict]:
         time.sleep(1)
 
     print("\n[COLETA] LinkedIn Guest...")
-    for termo in termos[:3]:
+    for termo in TERMOS_LINKEDIN:
         brutas.extend(buscar_vagas_linkedin_guest(termo))
         time.sleep(1)
 

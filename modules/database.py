@@ -148,3 +148,27 @@ def salvar_vaga_processada(
         print(f"[BANCO] '{registro['titulo_vaga']}' gravada no Supabase.")
     except Exception as erro:
         print(f"[ERRO BANCO] Falha ao gravar '{registro['titulo_vaga']}': {erro}")
+
+
+def ultima_notificacao(supabase: Optional[Any]) -> Optional[datetime]:
+    """
+    Quando a ultima vaga foi notificada. Serve ao sinal de vida: sem isso o
+    agente nao consegue distinguir "mercado parado ha 3 dias" de "rodei agora".
+    Devolve None se o banco nao responder - o chamador trata como "faz tempo".
+    """
+    if not supabase:
+        return None
+    try:
+        resposta = (
+            supabase.table(TABELA)
+            .select("created_at")
+            .eq("status", "notificada")
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        if resposta.data:
+            return datetime.fromisoformat(resposta.data[0]["created_at"].replace("Z", "+00:00"))
+    except Exception as erro:
+        print(f"[AVISO] Falha ao consultar ultima notificacao: {erro}")
+    return None
