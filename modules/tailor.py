@@ -19,9 +19,19 @@ from modules.llm import chamar_llm_json
 # Ao publicar um projeto com alguma delas, remova o item desta lista (e adicione
 # a skill no perfil.json) - nao antes.
 BLOQUEIO_ALUCINACAO = [
+    # Ferramentas de dados
     "airflow", "dbt", "spark", "pyspark", "kafka", "databricks", "snowflake",
     "hadoop", "scala", "power bi", "powerbi", "tableau", "looker", "bigquery",
     "redshift", "synapse", "talend", "pentaho", "informatica powercenter",
+    # Ferramentas de suporte de TI. Vaga de suporte pede outro conjunto de
+    # ferramentas, e o risco de invencao e o mesmo: o perfil tem suporte a
+    # dispositivos moveis, ERP Protheus e Pacote Office - nao administracao de
+    # servidor nem rede. "Office 365" aqui e administracao do tenant, diferente
+    # do "Pacote Office" que ele realmente usa.
+    "active directory", "glpi", "zabbix", "servicenow", "jira service desk",
+    "itil", "windows server", "vmware", "hyper-v", "sccm", "intune",
+    "office 365", "azure ad", "powershell", "cisco", "mikrotik", "pfsense",
+    "firewall", "vpn", "bash script",
 ]
 
 LIMITE_DESCRICAO = 6000
@@ -64,8 +74,89 @@ def _encontrar_alucinacoes(texto: str, skills_factuais: set[str]) -> list[str]:
     return encontrados
 
 
-def _montar_prompt(titulo_vaga: str, descricao_vaga: str, perfil: dict, correcao: str = "") -> str:
+_PERSONA = {
+    "dados": (
+        "Voce e especialista em recrutamento tecnico para Engenharia de Dados, Analytics e BI\n"
+        "    no mercado brasileiro, com foco em vagas de nivel JUNIOR / TRAINEE / ESTAGIO."
+    ),
+    "suporte": (
+        "Voce e especialista em recrutamento para Suporte Tecnico de TI (N1 e N2), Service Desk\n"
+        "    e Help Desk no mercado brasileiro."
+    ),
+}
+
+_CALIBRACAO = {
+    "dados": """CALIBRACAO: o candidato esta em transicao de carreira e comprova a stack por
+       PROJETOS PRATICOS publicados, nao por tempo de CLT na area. Nao penalize
+       ausencia de experiencia formal em dados se os projetos cobrem o que a vaga pede.
+       Penalize de verdade apenas: senioridade incompativel, stack central ausente
+       (ex.: vaga 100% Spark/Databricks) ou area diferente (ex.: ciencia de dados pura).""",
+    "suporte": """CALIBRACAO: esta vaga e um MOVIMENTO LATERAL DE RENDA, nao de carreira. O
+       candidato tem experiencia real e verificavel de suporte no proprio perfil: diagnostico
+       tecnico e suporte a dispositivos moveis (Marsk Cell), operacao de ERP Protheus e Pacote
+       Office em ambiente corporativo (Unimed Goiania) e automacao de rotinas em Python com
+       extracao de dados de CRM (Faculdade Realiza).
+       Para N1/N2 ele e tecnicamente SOBREQUALIFICADO: saber Python, SQL e Docker e um
+       DIFERENCIAL forte em service desk, nao um desvio de foco - trate como ponto positivo.
+       Penalize de verdade apenas: exigencia de ferramenta especifica de infraestrutura que ele
+       nao tem (Active Directory, Zabbix, GLPI, Windows Server, redes Cisco), certificacao
+       obrigatoria que ele nao possui, ou vaga que na pratica e call center / SAC disfarcado.""",
+}
+
+_TAREFA_PROJETOS = {
+    "dados": """Ordene projetos_prioritarios do mais para o menos relevante PARA ESTA VAGA,
+       copiando os titulos EXATAMENTE como aparecem em projetos_tecnicos do perfil.
+       Liste todos; o curriculo usa apenas os primeiros.""",
+    "suporte": """Ordene projetos_prioritarios priorizando os que demonstram AUTONOMIA TECNICA e
+       automacao de rotina operacional, copiando os titulos EXATAMENTE como aparecem em
+       projetos_tecnicos do perfil. Em vaga de suporte o projeto e diferencial, nao o
+       argumento principal - a experiencia de atendimento vem primeiro no curriculo.""",
+}
+
+_PITCH = {
+    "dados": "Apresentacao de 1 minuto focada em dados, pipelines e SQL",
+    "suporte": (
+        "Apresentacao de 1 minuto focada em atendimento ao usuario, diagnostico e resolucao "
+        "de problemas, citando o diferencial de automatizar tarefas repetitivas com Python"
+    ),
+}
+
+_PROIBIDO = {
+    "dados": """Airflow, dbt, Spark/PySpark, Kafka, Databricks, Snowflake, Hadoop, Scala,
+      Power BI, Tableau, Looker, BigQuery, Redshift.""",
+    "suporte": """Active Directory, Windows Server, Zabbix, GLPI, ServiceNow, Jira Service
+      Desk, ITIL, VMware, Hyper-V, Intune, SCCM, administracao de Office 365 ou Azure AD,
+      PowerShell, redes Cisco/Mikrotik, firewall e VPN. Ele usa o Pacote Office, o que e
+      diferente de administrar o tenant do Office 365 - nao confunda os dois.""",
+}
+
+_PERMITIDO = {
+    "dados": """Python, Pandas, SQLAlchemy, boto3, Pydantic,
+      PostgreSQL, SQLite, DuckDB, SQL analitico, AWS (S3, Lambda, IAM, Athena), Parquet,
+      Pandera, pytest, Docker, Git, GitHub Actions, Poetry, FastAPI, Streamlit.""",
+    "suporte": """diagnostico tecnico e suporte a dispositivos moveis, atendimento
+      ao cliente, ERP Protheus (TOTVS), Pacote Office, sistema RR Juridico, CRM Chatwoot,
+      controle de estoque e conferencia de inventario, e as competencias tecnicas reais:
+      Python, SQL, PostgreSQL, Docker, Git, automacao de rotinas.""",
+}
+
+_EXTRA_SUPORTE = """
+    8. SALARIO: se a descricao der qualquer pista de faixa salarial, diga na
+       justificativa_match se a vaga parece pagar ACIMA de R$ 2.500 por mes. O candidato
+       ja ganha esse valor com beneficios e nao tem interesse em sair por menos. Se a
+       descricao nao mencionar valor, diga explicitamente que o salario nao foi informado.
+"""
+
+
+def _montar_prompt(
+    titulo_vaga: str,
+    descricao_vaga: str,
+    perfil: dict,
+    categoria: str = "dados",
+    correcao: str = "",
+) -> str:
     descricao = (descricao_vaga or titulo_vaga or "")[:LIMITE_DESCRICAO]
+    categoria = categoria if categoria in _PERSONA else "dados"
 
     bloco_correcao = ""
     if correcao:
@@ -78,8 +169,7 @@ def _montar_prompt(titulo_vaga: str, descricao_vaga: str, perfil: dict, correcao
     """
 
     return f"""
-    Voce e especialista em recrutamento tecnico para Engenharia de Dados, Analytics e BI
-    no mercado brasileiro, com foco em vagas de nivel JUNIOR / TRAINEE / ESTAGIO.
+    {_PERSONA[categoria]}
 
     PERFIL FACTUAL DO CANDIDATO (FONTE UNICA DA VERDADE):
     {json.dumps(perfil, ensure_ascii=False, indent=2)}
@@ -95,33 +185,25 @@ def _montar_prompt(titulo_vaga: str, descricao_vaga: str, perfil: dict, correcao
 
     SUAS TAREFAS:
     1. Calcule match_score (0 a 100) entre o perfil e a vaga.
-       CALIBRACAO: o candidato esta em transicao de carreira e comprova a stack por
-       PROJETOS PRATICOS publicados, nao por tempo de CLT na area. Nao penalize
-       ausencia de experiencia formal em dados se os projetos cobrem o que a vaga pede.
-       Penalize de verdade apenas: senioridade incompativel, stack central ausente
-       (ex.: vaga 100% Spark/Databricks) ou area diferente (ex.: ciencia de dados pura).
-    2. Escreva justificativa_match objetiva: o que casa e o que falta, citando o
-       projeto especifico do perfil que sustenta cada ponto.
+       {_CALIBRACAO[categoria]}
+    2. Escreva justificativa_match objetiva: o que casa e o que falta, citando a
+       experiencia ou o projeto especifico do perfil que sustenta cada ponto.
     3. Reescreva o resumo profissional (resumo_adaptado) para ESTA vaga, em 3 a 5 linhas.
     4. Selecione e reordene habilidades_destacadas: APENAS habilidades que existem no
        perfil e que a vaga pede.
-    5. Ordene projetos_prioritarios do mais para o menos relevante PARA ESTA VAGA,
-       copiando os titulos EXATAMENTE como aparecem em projetos_tecnicos do perfil.
-       Liste todos; o curriculo usa apenas os primeiros.
+    5. {_TAREFA_PROJETOS[categoria]}
     6. Escreva cover_letter em 1a pessoa, no maximo 3 paragrafos, pronta para enviar.
     7. Monte dossie_entrevista com preparacao real para essa vaga.
+    {_EXTRA_SUPORTE if categoria == "suporte" else ""}
 
     REGRA DE VERACIDADE ABSOLUTA (MANDATORIA):
     - E PROIBIDO citar qualquer ferramenta, linguagem, framework, empresa ou experiencia
       que NAO esteja no PERFIL FACTUAL acima.
-    - Especificamente PROIBIDO (o candidato ainda nao tem projeto com elas):
-      Airflow, dbt, Spark/PySpark, Kafka, Databricks, Snowflake, Hadoop, Scala,
-      Power BI, Tableau, Looker, BigQuery, Redshift.
+    - Especificamente PROIBIDO (o candidato nao tem experiencia com elas):
+      {_PROIBIDO[categoria]}
     - Se a vaga exige algo que o candidato nao tem, DIGA ISSO na justificativa_match e
       baixe o score. NUNCA compense inventando.
-    - Use somente o que o perfil declara: Python, Pandas, SQLAlchemy, boto3, Pydantic,
-      PostgreSQL, SQLite, DuckDB, SQL analitico, AWS (S3, Lambda, IAM, Athena), Parquet,
-      Pandera, pytest, Docker, Git, GitHub Actions, Poetry, FastAPI, Streamlit.
+    - Use somente o que o perfil declara: {_PERMITIDO[categoria]}
     {bloco_correcao}
     RETORNE ESTRITAMENTE ESTE JSON, sem markdown em volta e sem texto extra:
     {{
@@ -139,7 +221,7 @@ def _montar_prompt(titulo_vaga: str, descricao_vaga: str, perfil: dict, correcao
                 {{"pergunta": "...", "resposta_sugerida": "..."}}
             ],
             "perguntas_para_recrutador": ["Pergunta 1", "Pergunta 2"],
-            "pitch_elevador": "Apresentacao de 1 minuto focada em dados, pipelines e SQL"
+            "pitch_elevador": "{_PITCH[categoria]}"
         }}
     }}
     """
@@ -157,8 +239,9 @@ def analisar_vaga(vaga: dict, perfil: dict) -> tuple[dict, str]:
     skills = _skills_factuais(perfil)
     titulo = vaga.get("titulo", "")
     descricao = vaga.get("descricao", "")
+    categoria = vaga.get("categoria", "dados")
 
-    analise, provider = chamar_llm_json(_montar_prompt(titulo, descricao, perfil))
+    analise, provider = chamar_llm_json(_montar_prompt(titulo, descricao, perfil, categoria))
 
     textos_livres = " ".join([
         str(analise.get("resumo_adaptado", "")),
@@ -169,7 +252,7 @@ def analisar_vaga(vaga: dict, perfil: dict) -> tuple[dict, str]:
     if invencoes:
         print(f"[VERACIDADE] IA citou tecnologia inexistente no perfil: {invencoes}. Refazendo...")
         analise, provider = chamar_llm_json(
-            _montar_prompt(titulo, descricao, perfil, correcao=", ".join(invencoes))
+            _montar_prompt(titulo, descricao, perfil, categoria, correcao=", ".join(invencoes))
         )
         textos_livres = " ".join([
             str(analise.get("resumo_adaptado", "")),

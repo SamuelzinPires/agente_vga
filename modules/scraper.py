@@ -14,6 +14,7 @@ ao LLM sem passar por todos os filtros daqui primeiro.
 """
 
 import html
+import os
 import re
 import sys
 import time
@@ -52,9 +53,19 @@ TERMOS_BUSCA = [
     "dados",
 ]
 
+# Suporte tecnico. Volume medido na Gupy em 27/09: 199, 249, 29, 34, 6.
+TERMOS_BUSCA_SUPORTE = [
+    "suporte tecnico",
+    "analista de suporte",
+    "service desk",
+    "help desk",
+    "suporte n2",
+]
+
 # O LinkedIn cobra mais caro em tempo por termo e devolve menos por busca, entao
-# leva so os tres mais produtivos em vez da lista inteira.
+# leva so os mais produtivos em vez da lista inteira.
 TERMOS_LINKEDIN = ["engenheiro de dados", "analista de dados", "data engineer"]
+TERMOS_LINKEDIN_SUPORTE = ["analista de suporte tecnico", "service desk"]
 
 REPOS_VAGAS_GITHUB = ["backend-br/vagas"]
 
@@ -266,15 +277,40 @@ CARGOS_ALVO_REGEX = [
     r"\banalista\s+de\s+etl\b", r"\bdata\s*ops\b", r"\bengenheir[oa]\s+de\s+bi\b",
 ]
 
-# Perfis vizinhos que NAO sao o alvo hoje (exigem estatistica/modelagem preditiva)
+# Suporte tecnico N1/N2: movimento lateral de renda enquanto a carreira de dados
+# amadurece. So interessa acima do piso salarial atual - ver e_salario_aceitavel().
+CARGOS_SUPORTE_REGEX = [
+    r"\bsuporte\s+t[eé]cnico\b", r"\banalista\s+de\s+suporte\b",
+    r"\bt[eé]cnico\s+de\s+suporte\b", r"\bsuporte\s+de\s+ti\b",
+    r"\bsuporte\s+n[12]\b", r"\bservice\s*desk\b", r"\bhelp\s*desk\b", r"\bhelpdesk\b",
+    r"\banalista\s+de\s+ti\b", r"\bsuporte\s+ao\s+usu[aá]rio\b",
+]
+
+# Profissoes que simplesmente nao sao o alvo. Barram em qualquer categoria e
+# tem precedencia sobre tudo.
 CARGOS_EXCLUIDOS_REGEX = [
+    # Perfis vizinhos de dados que exigem estatistica/modelagem preditiva
     r"\bcientista\s+de\s+dados\b", r"\bdata\s+scientist\b", r"\bmachine\s+learning\b",
     r"\bestat[ií]stic[oa]\b", r"\bcientista\b",
-    r"\bhelpdesk\b", r"\bservice\s*desk\b", r"\bsuporte\s*n[12]\b", r"\batendimento\b",
+    # Fora de escopo em qualquer categoria
     r"\bprofessor[a]?\b", r"\bdocente\b", r"\binstrutor[a]?\b", r"\btutor[a]?\b",
     r"\bcomercial\b", r"\bvendas\b", r"\bvendedor[a]?\b", r"\bsdr\b", r"\bbdr\b",
     r"\bscrum\s*master\b", r"\bagile\s*coach\b", r"\bproduct\s*owner\b", r"\bproduct\s*manager\b",
     r"\bdesigner\b", r"\bux\b", r"\bui\b",
+]
+
+# Call center disfarcado de suporte: a busca por "suporte" na Gupy devolve muito
+# SAC e teleatendimento com a palavra no titulo. Medido: "Especialista
+# Relacionamento Cliente I (SAC e Suporte)" a R$ 1.621 e "Operador de
+# Teleatendimento - Suporte Tecnico" a R$ 1.625.
+#
+# Esta lista NAO pode barrar antes da checagem de dados: "Analista de BI - Call
+# Center" e vaga legitima de BI numa empresa de call center - ali o termo e o
+# setor, nao o cargo. Por isso ela so vale depois de descartada a hipotese dados.
+CALL_CENTER_REGEX = [
+    r"\bteleatendimento\b", r"\bcall\s*center\b", r"\bsac\b", r"\btelevendas\b",
+    r"\brelacionamento\s+com\s+o\s+cliente\b", r"\boperador[a]?\s+de\s+telemarketing\b",
+    r"\btelemarketing\b",
 ]
 
 SENIORIDADE_ALTA_REGEX = [
@@ -333,13 +369,39 @@ def _texto_completo(vaga: dict) -> str:
     return " ".join(str(p) for p in partes).lower()
 
 
-def e_cargo_de_dados(vaga: dict) -> bool:
+def classificar_cargo(vaga: dict) -> str | None:
+    """
+    Decide a categoria da vaga: "dados", "suporte" ou None (fora do alvo).
+
+    Grava o resultado em vaga["categoria"], porque daqui pra frente quase tudo
+    muda de comportamento conforme a categoria: o prompt da IA, a ordem das
+    secoes do curriculo, o selo da notificacao e a prioridade na fila.
+    """
     titulo = str(vaga.get("titulo", "")).lower()
+
     if any(re.search(p, titulo) for p in SENIORIDADE_ALTA_REGEX):
-        return False
+        return None
     if any(re.search(p, titulo) for p in CARGOS_EXCLUIDOS_REGEX):
-        return False
-    return any(re.search(p, titulo) for p in CARGOS_ALVO_REGEX)
+        return None
+
+    # Dados primeiro, e antes da trava de call center: e o alvo de carreira, e
+    # "Analista de BI - Call Center" e vaga de BI, nao de atendimento.
+    if any(re.search(p, titulo) for p in CARGOS_ALVO_REGEX):
+        vaga["categoria"] = "dados"
+        return "dados"
+
+    if any(re.search(p, titulo) for p in CALL_CENTER_REGEX):
+        return None
+
+    if any(re.search(p, titulo) for p in CARGOS_SUPORTE_REGEX):
+        vaga["categoria"] = "suporte"
+        return "suporte"
+
+    return None
+
+
+def e_cargo_no_alvo(vaga: dict) -> bool:
+    return classificar_cargo(vaga) is not None
 
 
 def e_remota_ou_goiania(vaga: dict) -> bool:
@@ -393,8 +455,125 @@ def e_vaga_publico_geral(vaga: dict) -> bool:
     return not any(re.search(p, texto) for p in GRUPO_EXCLUSIVO_REGEX)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Salario (so importa para vagas de suporte)
+# ─────────────────────────────────────────────────────────────────────────────
+
+PISO_SALARIAL_SUPORTE = float(os.getenv("PISO_SALARIAL_SUPORTE", "2500"))
+
+# Janela de valor plausivel para salario mensal. O piso de 1.000 e o que descarta
+# sozinho vale-refeicao (R$ 300-800) e valor por hora (R$ 43,68) sem precisar
+# entender o contexto da frase.
+SALARIO_MIN_PLAUSIVEL = 1000.0
+SALARIO_MAX_PLAUSIVEL = 20000.0
+
+_VALOR = r"R\$\s*([0-9]{1,3}(?:\.[0-9]{3})+|[0-9]{3,6})(?:,([0-9]{2}))?"
+_PALAVRA_SALARIAL = r"(?:sal[aá]ri\w*|remunera\w*|faixa\s+salarial|vencimento)"
+_FAIXA = _VALOR + r"\s*(?:a|at[eé]|e|[-–])\s*" + _VALOR
+
+# Beneficio nao e salario. Um vale-alimentacao de R$ 1.200 cai dentro da janela
+# plausivel e, sem esta trava, seria lido como salario e descartaria a vaga por
+# estar "abaixo do piso" - quando na verdade o salario nao foi informado.
+_PALAVRA_BENEFICIO = (
+    r"(?:vale[\s-]?\w*|\bvr\b|\bva\b|\bvt\b|aux[ií]lio\w*|ajuda\s+de\s+custo|cesta|"
+    r"plano\s+de\s+(?:sa[uú]de|odonto\w*)|b[oô]nus|gympass|totalpass|"
+    r"assist[êe]ncia\s+\w+|reembolso|premia\w*|home\s*office)"
+)
+
+
+def _para_float(inteiro: str, centavos: str | None) -> float:
+    """Converte o formato brasileiro (1.621,00) em float."""
+    valor = float(inteiro.replace(".", ""))
+    if centavos:
+        valor += float(centavos) / 100
+    return valor
+
+
+def _plausivel(valor: float) -> bool:
+    return SALARIO_MIN_PLAUSIVEL <= valor <= SALARIO_MAX_PLAUSIVEL
+
+
+def extrair_salario(texto: str) -> tuple[float | None, float | None]:
+    """
+    Tenta achar o salario mensal na descricao. Devolve (minimo, maximo), ou
+    (None, None) quando nao da para afirmar nada.
+
+    Cascata de tres tentativas, da mais confiavel para a menos:
+      1. faixa explicita ("de R$ 2.000 a R$ 3.000");
+      2. valor logo depois de uma palavra salarial (ate 80 caracteres);
+      3. o maior valor dentro da janela plausivel.
+
+    A cascata existe porque a descricao mistura salario com beneficio: pegar o
+    primeiro R$ que aparece transformaria um vale-refeicao de R$ 500 em salario
+    e descartaria a vaga por engano.
+    """
+    if not texto:
+        return None, None
+
+    # 1. Faixa explicita
+    faixa = re.search(_FAIXA, texto, re.IGNORECASE)
+    if faixa:
+        a = _para_float(faixa.group(1), faixa.group(2))
+        b = _para_float(faixa.group(3), faixa.group(4))
+        menor, maior = min(a, b), max(a, b)
+        if _plausivel(maior):
+            return menor, maior
+
+    # 2. Valor ancorado em palavra salarial
+    for palavra in re.finditer(_PALAVRA_SALARIAL, texto, re.IGNORECASE):
+        janela = texto[palavra.end():palavra.end() + 80]
+        valor = re.search(_VALOR, janela)
+        if valor:
+            montante = _para_float(valor.group(1), valor.group(2))
+            if _plausivel(montante):
+                return montante, montante
+
+    # 3. Maior valor plausivel que nao seja beneficio
+    plausiveis = []
+    for achado in re.finditer(_VALOR, texto):
+        montante = _para_float(achado.group(1), achado.group(2))
+        if not _plausivel(montante):
+            continue
+        antes = texto[max(0, achado.start() - 45):achado.start()]
+        if re.search(_PALAVRA_BENEFICIO, antes, re.IGNORECASE):
+            continue
+        plausiveis.append(montante)
+
+    if plausiveis:
+        maior = max(plausiveis)
+        return maior, maior
+
+    return None, None
+
+
+def e_salario_aceitavel(vaga: dict) -> bool:
+    """
+    Aplica o piso salarial APENAS a vagas de suporte - vaga de dados passa direto,
+    porque ali o critério é carreira, não renda imediata.
+
+    Salario desconhecido passa de proposito: 80% das vagas de suporte nao publicam
+    valor, e descartar todas as cegas jogaria fora justamente as que pagam bem
+    (empresa que paga acima da media raramente anuncia). Essas chegam marcadas na
+    notificacao para você perguntar no processo.
+    """
+    if vaga.get("categoria") != "suporte":
+        return True
+
+    minimo, maximo = extrair_salario(vaga.get("descricao", ""))
+    vaga["salario_min"] = minimo
+    vaga["salario_max"] = maximo
+
+    if maximo is None:
+        return True
+
+    # Testa contra o topo da faixa: "R$ 2.000 a R$ 3.000" merece ser vista, e a
+    # notificacao mostra a faixa inteira para você ver o piso real.
+    return maximo >= PISO_SALARIAL_SUPORTE
+
+
 FILTROS = [
-    ("cargo fora do alvo de dados", e_cargo_de_dados),
+    ("cargo fora do alvo", e_cargo_no_alvo),
+    ("suporte abaixo do piso salarial", e_salario_aceitavel),
     ("fora de remoto/Goiania", e_remota_ou_goiania),
     ("fora do Brasil", e_vaga_no_brasil),
     ("candidatura paga", e_candidatura_gratuita),
@@ -423,9 +602,13 @@ def _deduplicar(vagas: list[dict]) -> list[dict]:
     return unicas
 
 
-def coletar_vagas_todas_fontes(termos: list[str] = None) -> list[dict]:
+def coletar_vagas_todas_fontes(termos: list[str] = None, incluir_suporte: bool = True) -> list[dict]:
     """Varre todas as fontes, deduplica e aplica os filtros gratuitos."""
-    termos = termos or TERMOS_BUSCA
+    termos = list(termos or TERMOS_BUSCA)
+    termos_linkedin = list(TERMOS_LINKEDIN)
+    if incluir_suporte:
+        termos += TERMOS_BUSCA_SUPORTE
+        termos_linkedin += TERMOS_LINKEDIN_SUPORTE
     brutas = []
 
     print("\n[COLETA] Gupy (fonte principal)...")
@@ -434,7 +617,7 @@ def coletar_vagas_todas_fontes(termos: list[str] = None) -> list[dict]:
         time.sleep(1)
 
     print("\n[COLETA] LinkedIn Guest...")
-    for termo in TERMOS_LINKEDIN:
+    for termo in termos_linkedin:
         brutas.extend(buscar_vagas_linkedin_guest(termo))
         time.sleep(1)
 
@@ -460,6 +643,9 @@ def coletar_vagas_todas_fontes(termos: list[str] = None) -> list[dict]:
     print("[FILTROS] Descartadas por motivo:")
     for motivo, total in reprovadas.items():
         print(f"          - {motivo}: {total}")
-    print(f"[FILTROS] {len(aprovadas)} vagas aprovadas para analise da IA.\n")
+
+    dados = sum(1 for v in aprovadas if v.get("categoria") == "dados")
+    suporte = len(aprovadas) - dados
+    print(f"[FILTROS] {len(aprovadas)} vagas aprovadas: {dados} de dados, {suporte} de suporte.\n")
 
     return aprovadas

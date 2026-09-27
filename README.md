@@ -23,8 +23,8 @@ GitHub Actions (cron 2x/dia)
         │               └─ GitHub Issues
         │                      │
         │                      ▼
-        │               filtros gratuitos (regex): cargo · senioridade ·
-        │               localidade · paywall · vaga afirmativa restrita
+        │               filtros gratuitos (regex): cargo e categoria · senioridade ·
+        │               piso salarial (suporte) · localidade · paywall · afirmativa
         │                      │
         ├─► database.py ─► dedupe no Supabase (vaga já vista não volta)
         │                      │
@@ -59,6 +59,21 @@ não sei usar não passa da primeira pergunta técnica.
 
 **Sem auto-apply.** Uma candidatura ruim disparada em meu nome não tem desfazer, e a maioria das
 vagas de dados no Brasil é via Gupy, que exige aplicação manual de qualquer forma.
+
+**Duas categorias com regras próprias.** Além das vagas de dados (objetivo de carreira), o agente
+acompanha **suporte técnico N1/N2** como movimento lateral de renda. Cada vaga carrega uma
+`categoria`, e ela muda o comportamento de quatro módulos: o prompt da IA, a ordem das seções do
+currículo, o selo da notificação e a prioridade na fila. Sem essa separação uma vaga de suporte
+seria pontuada contra um perfil de Engenharia de Dados, tiraria ~30% e morreria no corte —
+a funcionalidade sairia muda.
+
+**Piso salarial só onde faz sentido.** Vaga de suporte abaixo de `PISO_SALARIAL_SUPORTE` é
+descartada **antes** de qualquer chamada de IA. A extração do valor é deliberadamente conservadora:
+descrições misturam salário com benefício, e ler um vale-alimentação de R$ 1.200 como salário
+descartaria a vaga por engano. A cascata tenta faixa explícita, depois valor ancorado em palavra
+salarial, depois o maior valor plausível que não venha precedido de termo de benefício — e quando
+nada é confiável, devolve "não informado" em vez de adivinhar. Como 80% das vagas de suporte não
+publicam valor, essas seguem para análise marcadas, para eu perguntar no processo.
 
 ---
 
@@ -153,6 +168,8 @@ Outras decisões de segurança:
 | `PAUSA_ENTRE_VAGAS` | `4` | Segundos entre análises |
 | `GEMINI_MODEL` | `gemini-3.5-flash` | Modelo principal |
 | `GROQ_MODEL` | `openai/gpt-oss-120b` | Modelo de fallback |
+| `PISO_SALARIAL_SUPORTE` | `2500` | Piso para vaga de suporte; abaixo disso é descartada |
+| `MAX_SUPORTE_POR_RODADA` | `8` | Teto de vagas de suporte por execução |
 
 > Nome de modelo é a peça que mais envelhece neste projeto: os dois provedores aposentam versão
 > sem aviso, e o alias "latest" do Gemini estava devolvendo 503 por excesso de demanda no free

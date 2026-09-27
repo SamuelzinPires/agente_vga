@@ -49,6 +49,7 @@ PASTA_CURRICULOS = "curriculos_gerados"
 SCORE_MINIMO = int(os.getenv("SCORE_MINIMO", "60"))
 SCORE_FORTE = int(os.getenv("SCORE_FORTE", "75"))
 MAX_VAGAS_POR_RODADA = int(os.getenv("MAX_VAGAS_POR_RODADA", "30"))
+MAX_SUPORTE_POR_RODADA = int(os.getenv("MAX_SUPORTE_POR_RODADA", "8"))
 PAUSA_ENTRE_VAGAS = int(os.getenv("PAUSA_ENTRE_VAGAS", "4"))
 
 
@@ -97,7 +98,9 @@ def processar_vaga(vaga: dict, perfil: dict, supabase, notificar: bool) -> str:
     nome_pdf = f"CV_{_nome_arquivo_seguro(vaga.get('empresa', 'Empresa'))}.pdf"
     caminho_pdf = os.path.join(PASTA_CURRICULOS, nome_pdf)
 
-    gerar_pdf_curriculo(perfil, analise, output_filename=caminho_pdf)
+    gerar_pdf_curriculo(
+        perfil, analise, output_filename=caminho_pdf, categoria=vaga.get("categoria", "dados")
+    )
     caminho_dossie = gerar_dossie_vaga(vaga, analise)
     caminho_carta = gerar_arquivo_carta_apresentacao(vaga, analise, perfil)
 
@@ -181,9 +184,11 @@ def main() -> None:
     if args.dry_run:
         print(f"\n[DRY-RUN] {len(vagas)} vagas aprovadas pelos filtros (IA nao foi chamada):\n")
         for indice, vaga in enumerate(vagas, 1):
-            print(f"{indice:3d}. {vaga.get('titulo')}")
+            sal = vaga.get("salario_max")
+            etiqueta_sal = f" | R$ {sal:.0f}" if sal else (" | sal. n/informado" if vaga.get("categoria") == "suporte" else "")
+            print(f"{indice:3d}. [{vaga.get('categoria', '?'):7}] {vaga.get('titulo')}")
             print(f"     {vaga.get('empresa')} | {vaga.get('localizacao')} "
-                  f"| {vaga.get('modalidade') or 'n/d'} | {vaga.get('fonte')}")
+                  f"| {vaga.get('modalidade') or 'n/d'} | {vaga.get('fonte')}{etiqueta_sal}")
         return
 
     supabase = inicializar_supabase()
@@ -196,17 +201,27 @@ def main() -> None:
         sinal_de_vida(supabase, len(vagas), not args.sem_telegram)
         return
 
-    fila = novas[:args.limite]
-    if len(novas) > len(fila):
-        print(f"[COTA] Analisando apenas {len(fila)} de {len(novas)} para proteger a cota de IA.")
+    # Suporte soma ~600 vagas na Gupy e lotaria o teto da rodada, expulsando as de
+    # dados - que sao o objetivo de carreira, nao de renda. Dados entram primeiro e
+    # suporte tem cota propria e menor.
+    dados = [v for v in novas if v.get("categoria") != "suporte"]
+    suporte = [v for v in novas if v.get("categoria") == "suporte"]
+    fila = (dados + suporte[:MAX_SUPORTE_POR_RODADA])[:args.limite]
+
+    print(f"[FILA] {len(dados)} de dados + {len(suporte)} de suporte disponiveis "
+          f"-> {len(fila)} nesta rodada (teto suporte: {MAX_SUPORTE_POR_RODADA}).")
 
     contadores = {"notificada": 0, "descartada": 0, "erro": 0}
+    por_categoria = {"dados": 0, "suporte": 0}
 
     for indice, vaga in enumerate(fila, 1):
-        print(f"\n--- [{indice}/{len(fila)}] {vaga.get('titulo')} ---")
+        categoria = vaga.get("categoria", "dados")
+        print(f"\n--- [{indice}/{len(fila)}] ({categoria}) {vaga.get('titulo')} ---")
         try:
             status = processar_vaga(vaga, perfil, supabase, notificar=not args.sem_telegram)
             contadores[status] += 1
+            if status == "notificada":
+                por_categoria[categoria] = por_categoria.get(categoria, 0) + 1
         except LLMIndisponivelError as erro:
             # Sem IA disponivel nao adianta seguir: encerra a rodada limpo.
             print(f"[PARADA] {erro}")
@@ -221,7 +236,8 @@ def main() -> None:
     resumo = (
         f"<b>Rodada concluida</b>\n"
         f"Analisadas: {sum(contadores.values())}\n"
-        f"Notificadas (>= {SCORE_MINIMO}%): {contadores['notificada']}\n"
+        f"Notificadas (>= {SCORE_MINIMO}%): {contadores['notificada']}"
+        f" ({por_categoria.get('dados', 0)} dados, {por_categoria.get('suporte', 0)} suporte)\n"
         f"Descartadas: {contadores['descartada']}\n"
         f"Erros: {contadores['erro']}"
     )

@@ -43,6 +43,7 @@ def gerar_pdf_curriculo(
     analise_ia: dict,
     output_filename: str = "curriculo_otimizado.pdf",
     design_config: dict = None,
+    categoria: str = "dados",
 ) -> str:
     design_config = design_config or {}
     cor_primaria_hex = design_config.get("cor_primaria", "#000000")
@@ -111,37 +112,48 @@ def gerar_pdf_curriculo(
     story.append(Paragraph(resumo, body_style))
     story.append(Spacer(1, 3))
 
-    # 3. Projetos tecnicos - vem ANTES da experiencia porque, em transicao de
-    #    carreira, e o projeto que comprova a stack da vaga.
+    # 3 e 4. Projetos e experiencia, em ordem que depende da categoria da vaga.
+    #
+    # Vaga de dados: projeto primeiro - em transicao de carreira e o projeto que
+    # comprova a stack pedida. Vaga de suporte: experiencia primeiro - ali o que
+    # importa e ja ter atendido usuario, e o projeto passa a ser diferencial.
+    bloco_projetos = []
     projetos = _ordenar_projetos(
         perfil_base.get("projetos_tecnicos", []),
         analise_ia.get("projetos_prioritarios", []),
     )[:MAX_PROJETOS]
 
     if projetos:
-        story.append(Paragraph("PROJETOS TECNICOS", section_style))
+        bloco_projetos.append(Paragraph("PROJETOS TECNICOS", section_style))
         for projeto in projetos:
             if isinstance(projeto, dict):
-                story.append(Paragraph(f"<b>{projeto.get('titulo', 'Projeto')}</b>", body_style))
+                bloco_projetos.append(Paragraph(f"<b>{projeto.get('titulo', 'Projeto')}</b>", body_style))
                 for topico in projeto.get("topicos", [])[:MAX_TOPICOS_POR_PROJETO]:
-                    story.append(Paragraph(f"• {topico}", bullet_style))
+                    bloco_projetos.append(Paragraph(f"• {topico}", bullet_style))
             else:
-                story.append(Paragraph(f"• {projeto}", bullet_style))
-            story.append(Spacer(1, 3))
+                bloco_projetos.append(Paragraph(f"• {projeto}", bullet_style))
+            bloco_projetos.append(Spacer(1, 3))
 
-    # 4. Experiencia profissional
+    bloco_experiencia = []
     experiencias = perfil_base.get("experiencias", [])[:MAX_EXPERIENCIAS]
     if experiencias:
-        story.append(Paragraph("EXPERIENCIA PROFISSIONAL", section_style))
+        bloco_experiencia.append(Paragraph("EXPERIENCIA PROFISSIONAL", section_style))
         for exp in experiencias:
             if isinstance(exp, dict):
                 cabecalho = f"<b>{exp.get('empresa', '')}</b> - {exp.get('cargo', '')} ({exp.get('periodo', '')})"
-                story.append(Paragraph(cabecalho, body_style))
+                bloco_experiencia.append(Paragraph(cabecalho, body_style))
                 for detalhe in exp.get("detalhes", [])[:MAX_DETALHES_POR_EXPERIENCIA]:
-                    story.append(Paragraph(f"• {detalhe}", bullet_style))
+                    bloco_experiencia.append(Paragraph(f"• {detalhe}", bullet_style))
             elif isinstance(exp, str):
-                story.append(Paragraph(exp, body_style))
-            story.append(Spacer(1, 3))
+                bloco_experiencia.append(Paragraph(exp, body_style))
+            bloco_experiencia.append(Spacer(1, 3))
+
+    if categoria == "suporte":
+        story.extend(bloco_experiencia)
+        story.extend(bloco_projetos)
+    else:
+        story.extend(bloco_projetos)
+        story.extend(bloco_experiencia)
 
     # 5. Habilidades tecnicas
     habilidades = perfil_base.get("habilidades_tecnicas", {})

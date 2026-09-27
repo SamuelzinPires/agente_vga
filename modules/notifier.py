@@ -28,6 +28,28 @@ def _faixa(match_score: int, score_forte: int) -> str:
     return "✅ VALE APLICAR"
 
 
+def _selo_categoria(categoria: str) -> str:
+    """Para nao confundir, de relance, movimento de carreira com movimento de renda."""
+    return "🛠️ SUPORTE" if categoria == "suporte" else "🧮 DADOS"
+
+
+def _linha_salario(vaga: dict) -> str:
+    """
+    Salario so e conhecido quando a descricao informa - e 80% das vagas de suporte
+    nao informam. Nesse caso o aviso e explicito, para você perguntar no processo
+    em vez de supor.
+    """
+    if vaga.get("categoria") != "suporte":
+        return ""
+
+    minimo, maximo = vaga.get("salario_min"), vaga.get("salario_max")
+    if maximo is None:
+        return "<b>Salário:</b> ⚠️ não informado — perguntar no processo"
+    if minimo is not None and minimo != maximo:
+        return f"<b>Salário:</b> R$ {minimo:,.0f} – R$ {maximo:,.0f}".replace(",", ".")
+    return f"<b>Salário:</b> R$ {maximo:,.0f}".replace(",", ".")
+
+
 def enviar_notificacao_vaga(
     vaga: dict,
     analise: dict,
@@ -55,12 +77,16 @@ def enviar_notificacao_vaga(
 
     # A carta completa NAO entra na mensagem: vai como anexo .txt. Junto com o
     # resto ela estoura os 4096 caracteres e a notificacao inteira se perde.
-    mensagem = f"""<b>{_faixa(score, score_forte)} — {score}%</b>
+    linha_salario = _linha_salario(vaga)
+    if linha_salario:
+        linha_salario = "\n" + linha_salario
+
+    mensagem = f"""<b>{_selo_categoria(vaga.get('categoria', 'dados'))} · {_faixa(score, score_forte)} — {score}%</b>
 
 <b>Cargo:</b> {html.escape(str(vaga.get('titulo', '')))}
 <b>Empresa:</b> {html.escape(str(vaga.get('empresa', '')))}
 <b>Local:</b> {html.escape(str(local))} ({html.escape(str(modalidade))})
-<b>Fonte:</b> {html.escape(str(vaga.get('fonte', '')))}
+<b>Fonte:</b> {html.escape(str(vaga.get('fonte', '')))}{linha_salario}
 {aviso}
 <b>Por que combina:</b>
 <i>{html.escape(_cortar(analise.get('justificativa_match', ''), 600))}</i>
